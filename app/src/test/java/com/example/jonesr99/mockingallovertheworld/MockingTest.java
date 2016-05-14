@@ -4,8 +4,6 @@ import org.junit.Test;
 
 import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.Method;
-import java.lang.reflect.Type;
-import java.util.Objects;
 
 import static org.junit.Assert.*;
 
@@ -15,8 +13,16 @@ import static org.junit.Assert.*;
 public class MockingTest {
     @Test
     public void givenIHaveAnInterfaceThenICanInstantiateAMock() throws Exception {
-        TestInterface mockObject = Mocking.mock(TestInterface.class);
+        Mocked<TestInterface> mockObject = Mocking.mock(TestInterface.class);
         assertNotNull(mockObject);
+    }
+
+    @Test
+    public void givenMyInterfaceHasAMethodICanVerifyItsInvocation() throws Exception {
+        Mocked<MethodTestInterface> mockObject = Mocking.mock(MethodTestInterface.class);
+
+        mockObject.get().one();
+        mockObject.verifyCalled().one();
     }
 
 
@@ -24,17 +30,35 @@ public class MockingTest {
 
     }
 
-    private static class Mocking {
+    public interface MethodTestInterface {
+        public void one();
+    }
 
-        public static <T> T mock(Class<T> clazz) throws IllegalAccessException, InstantiationException {
-            return (T) java.lang.reflect.Proxy.newProxyInstance(clazz.getClassLoader(), new Class<?>[]{clazz}, new InvocationHandler() {
+    private static class Mocking {
+        public static <T> Mocked<T> mock(Class<T> clazz) throws IllegalAccessException, InstantiationException {
+            return new Mocked(java.lang.reflect.Proxy.newProxyInstance(clazz.getClassLoader(), new Class<?>[]{clazz}, new InvocationHandler() {
                 @Override
                 public Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
                     return null;
                 }
-            });
+            }));
         }
     }
 
 
+    private static class Mocked<T> {
+        private T mockedObject;
+
+        public Mocked(T mockedObject) {
+            this.mockedObject = mockedObject;
+        }
+
+        public T get() {
+            return mockedObject;
+        }
+
+        public T verifyCalled() {
+            return null;
+        }
+    }
 }
