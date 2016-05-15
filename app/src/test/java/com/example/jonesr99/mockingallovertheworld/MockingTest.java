@@ -1,5 +1,7 @@
 package com.example.jonesr99.mockingallovertheworld;
 
+import android.support.annotation.NonNull;
+
 import org.junit.Test;
 
 import java.lang.reflect.InvocationHandler;
@@ -8,6 +10,7 @@ import java.lang.reflect.Proxy;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
+import java.util.List;
 
 import static org.junit.Assert.*;
 
@@ -28,10 +31,45 @@ public class MockingTest {
         mockObject.verifyCalled().one();
     }
 
-    @Test (expected = AssertionError.class)
+    @Test
     public void givenMyMethodIsNotCalledAssertionErrorIsThrown() throws Exception {
         MockedWrapper<MethodTestInterface> mockedObject = Mocker.mock(MethodTestInterface.class);
-        mockedObject.verifyCalled().one();
+        String errorMessage = null;
+        try {
+            mockedObject.verifyCalled().one();
+        } catch (AssertionError e) {
+            errorMessage = e.getMessage();
+        }
+        assertEquals("Expected one to be called with args: null, but there was no calls to this mock.", errorMessage);
+
+    }
+
+    @Test
+    public void givenMyMethodIsNotCalledButAnotherArglessMethodWasThenAssertionErrorIsThrownWithDetails() throws Exception {
+        MockedWrapper<MethodTestInterface> mockedObject = Mocker.mock(MethodTestInterface.class);
+        String errorMessage = null;
+        mockedObject.get().seven();
+        try {
+            mockedObject.verifyCalled().one();
+        } catch (AssertionError e) {
+            errorMessage = e.getMessage();
+        }
+        assertEquals("Expected one to be called with args: null, the calls with this mock were: \nseven", errorMessage);
+
+    }
+
+    @Test
+    public void givenMyMethodIsNotCalledButAnotherArgedMethodWasThenAssertionErrorIsThrownWithDetails() throws Exception {
+        MockedWrapper<MethodTestInterface> mockedObject = Mocker.mock(MethodTestInterface.class);
+        String errorMessage = null;
+        mockedObject.get().add(1,2);
+        try {
+            mockedObject.verifyCalled().one();
+        } catch (AssertionError e) {
+            errorMessage = e.getMessage();
+        }
+        assertEquals("Expected one to be called with args: null, the calls with this mock were: \nadd with args: 1 2 ", errorMessage);
+
     }
 
     @Test
@@ -49,37 +87,42 @@ public class MockingTest {
     }
 
     @Test
-    public void givenISpecifyReturnValueThenThatIsReturned() throws Exception {
+    public void givenISpecifyAnIntegerReturnValueThenThatIsReturned() throws Exception {
         MockedWrapper<MethodTestInterface> mockObject = Mocker.mock(MethodTestInterface.class);
-        assertNotNull(mockObject.get());
-        MethodTestInterface proxy = mockObject.returns(7);
-        proxy.seven();
+        mockObject.returns(7).seven();
         assertEquals(mockObject.get().seven(), 7);
     }
 
-    public interface TestInterface {
+    @Test
+    public void givenISpecifyAStringReturnValueThenThatIsReturned() throws Exception {
+        MockedWrapper<MethodTestInterface> mockObject = Mocker.mock(MethodTestInterface.class);
+        mockObject.returns("world").hello();
+        assertEquals(mockObject.get().hello(), "world");
+    }
 
+    public interface TestInterface {
     }
 
     public interface MethodTestInterface {
+
         void one();
         void add(int numberOne, int numberTwo);
         int seven();
+        String hello();
     }
-
     private static class Mocker {
+
         public static <T> MockedWrapper<T> mock(Class<T> clazz) throws IllegalAccessException, InstantiationException {
             MockInvocationHandler invocationHandler = new MockInvocationHandler();
             Object proxyInstance = Proxy.newProxyInstance(clazz.getClassLoader(), new Class<?>[]{clazz}, invocationHandler);
             return new MockedWrapper(proxyInstance, invocationHandler);
         }
-
     }
 
     private static class MethodCalledDetails {
+
         public final Method method;
         public final Object[] args;
-
         private MethodCalledDetails(Method method, Object[] args) {
             this.args = args;
             this.method = method;
@@ -104,35 +147,43 @@ public class MockingTest {
             result = 31 * result + Arrays.hashCode(args);
             return result;
         }
-    }
 
+    }
     private static class MockInvocationHandler implements InvocationHandler {
 
         private ArrayList<MethodCalledDetails> called = new ArrayList<>();
-        private HashMap<MethodCalledDetails, Object> returnValues = new HashMap<>();
 
+        private HashMap<MethodCalledDetails, Object> returnValues = new HashMap<>();
         @Override
         public Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
             MethodCalledDetails methodCalledDetails = new MethodCalledDetails(method, args);
             called.add(methodCalledDetails);
-
-            return returnValues.get(methodCalledDetails);
+            Object ret = returnValues.get(methodCalledDetails);
+            if(ret==null) {
+                ret = safeReturnNull(method.getReturnType());
+            }
+            return ret;
         }
 
         public boolean hasBeenCalled(Method method, Object[] args) {
             return called.contains(new MethodCalledDetails(method, args));
         }
 
+        public List<MethodCalledDetails> getCalls() {
+            return called;
+        }
+
         public void setValueForMethod(Method method, Object[] args, Object retVal) {
             returnValues.put(new MethodCalledDetails(method, args), retVal);
         }
+
     }
 
     private static class MockedWrapper<T> {
 
         private final T mockedObject;
-        private final MockInvocationHandler invocationHandler;
 
+        private final MockInvocationHandler invocationHandler;
         public MockedWrapper(T mockedObject, MockInvocationHandler invocationHandler) {
             this.mockedObject = mockedObject;
             this.invocationHandler = invocationHandler;
@@ -146,10 +197,47 @@ public class MockingTest {
             return createProxy(new InvocationHandler() {
                 @Override
                 public Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
-                    assertTrue(invocationHandler.hasBeenCalled(method, args));
+                    String message = getErrorMessage(method, args);
+
+                    assertTrue(message, invocationHandler.hasBeenCalled(method, args));
                     return null;
                 }
             });
+        }
+
+        private String getErrorMessage(Method method, Object[] args) {
+            String baseMessage = "Expected " + method.getName() + " to be called with args: " + args;
+
+            if(mockWasCalled()) {
+                return getErrorMessageForUncalledMock(baseMessage);
+            } else {
+                return getErrorMessageForCalledMock(baseMessage);
+            }
+        }
+
+        private boolean mockWasCalled(){ return invocationHandler.called.size() == 0;}
+
+        private String getErrorMessageForUncalledMock(String message) {
+            return message + ", but there was no calls to this mock.";
+        }
+
+        private String getErrorMessageForCalledMock(String message) {
+            message += ", the calls with this mock were: ";
+            for(MethodCalledDetails methodCall : invocationHandler.called) {
+                message += "\n" + methodCall.method.getName();
+                if(methodCall.args != null) {
+                    message += " with args: " + argsToString(methodCall.args);
+                }
+            }
+            return message;
+        }
+
+        private String argsToString(Object[] args) {
+            String result = "";
+            for(Object arg : args) {
+                result += arg.toString() + " ";
+            }
+            return result;
         }
 
         private T createProxy(InvocationHandler invocationHandler) {
@@ -166,26 +254,27 @@ public class MockingTest {
             });
         }
 
-        private Object safeReturnNull(Class<?> returnType) {
-            //boolean , byte , char , short , int , long , float and double
-            if(returnType.equals(Boolean.class)) {
-                return false;
-            } else if (returnType.equals(byte.class)) {
-                return (byte) 0;
-            } else if (returnType.equals(char.class)) {
-                return '\000';
-            } else if (returnType.equals(short.class)) {
-                return (short) 0;
-            } else if (returnType.equals(int.class)) {
-                return 0;
-            } else if (returnType.equals(long.class)) {
-                return 0L;
-            } else if (returnType.equals(float.class)) {
-                return  0f;
-            } else if (returnType.equals(double.class)) {
-                return  0d;
-            }
-            else return null;
+    }
+
+    private static Object safeReturnNull(Class<?> returnType) {
+        //boolean , byte , char , short , int , long , float and double
+        if(returnType.equals(Boolean.class)) {
+            return false;
+        } else if (returnType.equals(byte.class)) {
+            return (byte) 0;
+        } else if (returnType.equals(char.class)) {
+            return '\000';
+        } else if (returnType.equals(short.class)) {
+            return (short) 0;
+        } else if (returnType.equals(int.class)) {
+            return 0;
+        } else if (returnType.equals(long.class)) {
+            return 0L;
+        } else if (returnType.equals(float.class)) {
+            return  0f;
+        } else if (returnType.equals(double.class)) {
+            return  0d;
         }
+        else return null;
     }
 }
